@@ -11,7 +11,9 @@ const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  
+  // ✅ FIXED: Use Render's PORT environment variable
+  const PORT = parseInt(process.env.PORT || '3000', 10);
 
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -92,7 +94,7 @@ async function startServer() {
     }
   });
 
-  // --- Crawler Engine Endpoint (Updated for robustness) ---
+  // --- Crawler Engine Endpoint ---
   app.post('/api/crawl', async (req, res) => {
     console.log('[API] /api/crawl hit');
     try {
@@ -133,7 +135,6 @@ async function startServer() {
             const status = (pollData.status || '').toLowerCase();
             console.log(`[Crawler] Poll Status: ${status || 'Checking...'}`);
 
-            // Detect completion based on status or presence of data
             const results = pollData.links || pollData.results || pollData.data?.links || (Array.isArray(pollData) ? pollData : null);
 
             if (status === 'completed' || status === 'finished' || status === 'success') {
@@ -146,7 +147,6 @@ async function startServer() {
               throw new Error(`Crawl job failed on server: ${pollData.message || 'The crawler encountered an internal error.'}`);
             }
 
-            // Fallback: If no status field but we have an array, the job might be finished
             if (!status && Array.isArray(results) && results.length > 0) {
               rawLinks = results;
               break;
@@ -165,13 +165,12 @@ async function startServer() {
         throw new Error('Crawl timed out or yielded no results. The target site may be blocking headful discovery.');
       }
 
-      // 3. Cleaning & Filtering Logic (Robust extraction)
+      // Cleaning & Filtering Logic
       const cleanedData: { url: string; asin: string; type: 'product' | 'general' }[] = [];
       const seenUrls = new Set<string>();
       const productPattern = /\/(?:dp|product|gp\/product)\/([A-Z0-9]{10})/;
 
       for (let item of rawLinks) {
-        // Handle if item is a string or an object {url: '...'}
         let link = typeof item === 'string' ? item : (item.url || item.link || item.href);
         
         if (!link || typeof link !== 'string') continue;
@@ -203,7 +202,6 @@ async function startServer() {
         throw new Error('Zero valid links could be extracted from the crawl stream.');
       }
 
-      // Sort products to top
       cleanedData.sort((a,b) => (a.type === 'product' ? -1 : 1));
 
       res.json({ success: true, links: cleanedData });
@@ -225,8 +223,6 @@ async function startServer() {
         return res.status(500).json({ error: 'AI API Key missing. Please set Smartlinker_api or OPENROUTER_API_KEY.' });
       }
 
-      // Truncate content specifically for Qwen-Plus (supports ~32k context)
-      // 30,000 chars is roughly 10k-15k tokens, leaving plenty of room for prompt/response.
       const truncatedContent = truncateForAI(content || '', 40000); 
 
       const payload = {
@@ -247,7 +243,6 @@ async function startServer() {
       });
 
       if (!aiOk) {
-        console.error('[AI] OpenRouter Payload Sent:', JSON.stringify(payload).substring(0, 500) + '...');
         console.error('[AI] OpenRouter Error Raw:', JSON.stringify(data, null, 2));
         
         let errorMessage = 'AI Service Provider Error';
@@ -255,7 +250,6 @@ async function startServer() {
           if (typeof data.error === 'string') {
             errorMessage = data.error;
           } else {
-            // Drill down into nested error structures common in OpenRouter/Provider responses
             errorMessage = data.error.message || data.error.code || JSON.stringify(data.error);
           }
         } else if (data.message) {
@@ -289,8 +283,9 @@ async function startServer() {
     app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
   }
 
+  // ✅ FIXED: Using correct PORT and 0.0.0.0 binding
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running at http://localhost:${PORT}`);
+    console.log(`Server running on port ${PORT}`);
   });
 }
 
